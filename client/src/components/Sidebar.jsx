@@ -74,7 +74,7 @@ const Sidebar = () => {
                         <LogOut size={18} style={{ cursor: 'pointer', color: '#b3b3b3' }} onClick={handleLogout} />
                     </div>
                 ) : (
-                    <Link to="/login" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'white', fontWeight: 'bold', background: '#1db954', padding: '10px', borderRadius: '20px', justifyContent: 'center', color: 'black' }}>
+                    <Link to="/login" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', fontWeight: 'bold', background: '#1db954', padding: '10px', borderRadius: '20px', justifyContent: 'center', color: 'black' }}>
                         Log in
                     </Link>
                 )}

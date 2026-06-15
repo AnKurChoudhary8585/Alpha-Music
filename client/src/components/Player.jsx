@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useMusicStore } from '../store';
+import { API_BASE_URL } from '../config';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Heart, FolderPlus, ChevronDown, Repeat, Shuffle, Download, Share2, ThumbsDown, ThumbsUp, Cast, MoreVertical } from 'lucide-react';
 
 const Player = () => {
@@ -47,7 +48,7 @@ const Player = () => {
       if (isPlayerReady && currentTrack && playerRef.current.loadVideoById) {
         try {
           const query = `${currentTrack.title} ${currentTrack.artist} audio`;
-          const res = await fetch(`http://localhost:5000/api/yt-search?q=${encodeURIComponent(query)}`);
+          const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (data.videoId) {
             playerRef.current.loadVideoById(data.videoId);
@@ -122,7 +123,7 @@ const Player = () => {
           onClick={() => currentTrack && setIsFullScreen(true)}
         >
             {currentTrack ? (
-                <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `http://localhost:5000${currentTrack.coverUrl}`} style={{ width: '50px', height: '50px', background: '#333', borderRadius: '4px', objectFit: 'cover' }} alt="cover" />
+                <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `${API_BASE_URL}${currentTrack.coverUrl}`} style={{ width: '50px', height: '50px', background: '#333', borderRadius: '4px', objectFit: 'cover' }} alt="cover" />
             ) : (
                 <div style={{ width: '50px', height: '50px', background: '#333', borderRadius: '4px' }}></div>
             )}
@@ -198,7 +199,7 @@ const Player = () => {
             </div>
 
             <div className="fs-image-container">
-                <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `http://localhost:5000${currentTrack.coverUrl}`} className="fs-image" alt="cover" />
+                <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `${API_BASE_URL}${currentTrack.coverUrl}`} className="fs-image" alt="cover" />
             </div>
 
             <div className="fs-info-row">

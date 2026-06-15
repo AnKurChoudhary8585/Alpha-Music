@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Player from './Player';
 import { useMusicStore } from '../store';
+import { API_BASE_URL } from '../config';
 
 export default function Layout({ children }) {
   const { currentTrack, isPlaylistModalOpen, setIsPlaylistModalOpen, createPlaylist } = useMusicStore();
@@ -58,7 +59,7 @@ export default function Layout({ children }) {
             marginBottom: '30px',
             animation: 'zoomIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards'
           }}>
-             <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `http://localhost:5000${currentTrack.coverUrl}`} style={{ width: '192px', height: '192px', borderRadius: '4px', boxShadow: '0 4px 60px rgba(0,0,0,.5)' }} alt="cover" />
+             <img src={currentTrack.coverUrl.startsWith('http') ? currentTrack.coverUrl : `${API_BASE_URL}${currentTrack.coverUrl}`} style={{ width: '192px', height: '192px', borderRadius: '4px', boxShadow: '0 4px 60px rgba(0,0,0,.5)' }} alt="cover" />
              <div style={{ flex: 1 }}>
                <p style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px', color: '#fff' }}>Now Playing</p>
                <h1 style={{ fontSize: '4.5rem', fontWeight: 900, margin: 0, lineHeight: 1.1, color: '#fff' }}>{currentTrack.title}</h1>

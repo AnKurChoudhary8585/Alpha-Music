@@ -9,13 +9,14 @@ import LikedSongs from './pages/LikedSongs';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import { useMusicStore } from './store';
+import { API_BASE_URL } from './config';
 
 function App() {
   const { token, likedSongs, playlists, user, setUser } = useMusicStore();
 
   useEffect(() => {
     if (token) {
-      fetch('http://localhost:5000/api/auth/sync', {
+      fetch(`${API_BASE_URL}/api/auth/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, likedSongs, playlists })
