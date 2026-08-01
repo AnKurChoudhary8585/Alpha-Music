@@ -5,6 +5,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, Heart, FolderPlus, Chevron
 
 const Player = () => {
   const { currentTrack, isPlaying, togglePlay, setIsPlaying, nextTrack, prevTrack, likedSongs, toggleLike, playlists, setIsPlaylistModalOpen, addToPlaylist } = useMusicStore();
+  const audioRef = useRef(null);
   const playerRef = useRef(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -12,9 +13,38 @@ const Player = () => {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [showPlaylistMenu, setShowPlaylistMenu] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [activeSource, setActiveSource] = useState('none'); // 'audio' | 'youtube' | 'none'
 
   const isLiked = currentTrack && likedSongs?.some(s => s._id === currentTrack._id);
 
+  // Initialize HTML5 Audio Element
+  useEffect(() => {
+    const audio = new Audio();
+    audioRef.current = audio;
+
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onLoadedMetadata = () => setDuration(audio.duration);
+    const onEnded = () => nextTrack();
+    const onError = () => {
+      console.warn("Audio element failed, trying YouTube fallback...");
+      setActiveSource('youtube');
+    };
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('error', onError);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('error', onError);
+      audio.pause();
+    };
+  }, [nextTrack]);
+
+  // Initialize YouTube Iframe API
   useEffect(() => {
     const initPlayer = () => {
         playerRef.current = new window.YT.Player('yt-player-container', {
@@ -34,11 +64,8 @@ const Player = () => {
               }
             },
             onError: (e) => {
-              console.warn('YouTube Player playback error:', e.data);
-              // Automatically skip unplayable or age-restricted video after 2 seconds
-              setTimeout(() => {
-                nextTrack();
-              }, 1500);
+              console.warn('YouTube Player error:', e.data);
+              setTimeout(() => nextTrack(), 1500);
             }
           }
         });
@@ -55,51 +82,85 @@ const Player = () => {
     }
   }, [nextTrack]);
 
+  // Play current track logic
   useEffect(() => {
-    const fetchAndPlayVideo = async () => {
-      if (isPlayerReady && currentTrack && playerRef.current?.loadVideoById) {
+    if (!currentTrack) return;
+
+    const playTrack = async () => {
+      // 1. Try HTML5 Audio if audioUrl exists
+      if (currentTrack.audioUrl) {
+        const fullAudioUrl = currentTrack.audioUrl.startsWith('http')
+          ? currentTrack.audioUrl
+          : `${API_BASE_URL}${currentTrack.audioUrl}`;
+        
+        if (audioRef.current) {
+          audioRef.current.src = fullAudioUrl;
+          audioRef.current.volume = volume;
+          try {
+            await audioRef.current.play();
+            setActiveSource('audio');
+            setIsPlaying(true);
+            return;
+          } catch (err) {
+            console.warn("Direct audio play prevented or failed:", err);
+          }
+        }
+      }
+
+      // 2. Fallback to YouTube Iframe search
+      if (isPlayerReady && playerRef.current?.loadVideoById) {
         try {
           const query = `${currentTrack.title} ${currentTrack.artist} full song audio`;
           const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (data.videoId) {
+            setActiveSource('youtube');
             playerRef.current.loadVideoById(data.videoId);
             setIsPlaying(true);
           } else {
-             console.error('Video not found from search');
-             setIsPlaying(false);
+            console.error('Video not found from search');
+            setIsPlaying(false);
           }
         } catch (error) {
-           console.error('Error fetching video ID:', error);
-           setIsPlaying(false);
+          console.error('Error fetching video ID:', error);
+          setIsPlaying(false);
         }
       }
     };
-    fetchAndPlayVideo();
-  }, [currentTrack, isPlayerReady, setIsPlaying]);
 
+    playTrack();
+  }, [currentTrack]);
+
+  // Toggle play/pause control
   useEffect(() => {
-    if (isPlayerReady && playerRef.current && playerRef.current.playVideo) {
-        if (isPlaying) {
-            playerRef.current.playVideo();
-        } else {
-            playerRef.current.pauseVideo();
-        }
+    if (activeSource === 'audio' && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.play().catch(e => console.warn(e));
+      } else {
+        audioRef.current.pause();
+      }
+    } else if (activeSource === 'youtube' && isPlayerReady && playerRef.current?.playVideo) {
+      if (isPlaying) {
+        playerRef.current.playVideo();
+      } else {
+        playerRef.current.pauseVideo();
+      }
     }
-  }, [isPlaying, isPlayerReady]);
+  }, [isPlaying, activeSource, isPlayerReady]);
 
+  // YouTube interval timer for progress bar
   useEffect(() => {
     let interval;
-    if (isPlaying && isPlayerReady) {
+    if (activeSource === 'youtube' && isPlaying && isPlayerReady) {
       interval = setInterval(() => {
-        if (playerRef.current && playerRef.current.getCurrentTime) {
-            setCurrentTime(playerRef.current.getCurrentTime());
-            setDuration(playerRef.current.getDuration());
+        if (playerRef.current?.getCurrentTime) {
+          setCurrentTime(playerRef.current.getCurrentTime());
+          setDuration(playerRef.current.getDuration() || 0);
         }
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, isPlayerReady]);
+  }, [activeSource, isPlaying, isPlayerReady]);
 
   const handleTogglePlay = () => {
     if (!currentTrack) return;
@@ -107,15 +168,23 @@ const Player = () => {
   };
 
   const handleSeek = (e) => {
-    if (isPlayerReady && playerRef.current.seekTo) {
-        playerRef.current.seekTo(e.target.value, true);
-        setCurrentTime(e.target.value);
+    const newTime = parseFloat(e.target.value);
+    setCurrentTime(newTime);
+    if (activeSource === 'audio' && audioRef.current) {
+      audioRef.current.currentTime = newTime;
+    } else if (activeSource === 'youtube' && isPlayerReady && playerRef.current?.seekTo) {
+      playerRef.current.seekTo(newTime, true);
     }
   };
+
   const handleVolumeChange = (e) => {
-    if (isPlayerReady && playerRef.current.setVolume) {
-        playerRef.current.setVolume(e.target.value * 100);
-        setVolume(e.target.value);
+    const newVol = parseFloat(e.target.value);
+    setVolume(newVol);
+    if (audioRef.current) {
+      audioRef.current.volume = newVol;
+    }
+    if (isPlayerReady && playerRef.current?.setVolume) {
+      playerRef.current.setVolume(newVol * 100);
     }
   };
 
