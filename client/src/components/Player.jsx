@@ -188,7 +188,7 @@ const Player = () => {
     return null;
   };
 
-  // Play current track logic (STRICTLY FULL SONGS - INSTANT PARALLEL RESOLUTION)
+  // Play current track logic (0ms Instant Playback for full 320kbps MP3s)
   useEffect(() => {
     if (!currentTrack) return;
 
@@ -203,11 +203,31 @@ const Player = () => {
       setCurrentTime(0);
       setDuration(0);
 
-      // Resolve full song source in parallel (< 500ms)
+      // STEP 1: Instant Playback if track already has direct full-length audioUrl (JioSaavn 320kbps MP3)
+      if (currentTrack.audioUrl && audioRef.current) {
+        const fullAudioUrl = currentTrack.audioUrl.startsWith('http')
+          ? currentTrack.audioUrl
+          : `${API_BASE_URL}${currentTrack.audioUrl}`;
+        
+        audioRef.current.src = fullAudioUrl;
+        audioRef.current.volume = volume;
+        try {
+          await audioRef.current.play();
+          if (isSubscribed) {
+            setActiveSource('audio');
+            setIsPlaying(true);
+            return;
+          }
+        } catch (err) {
+          console.warn("Direct track audioUrl play failed, falling back to search...", err);
+        }
+      }
+
+      // STEP 2: Resolve full song source in parallel (< 500ms) if no direct audioUrl
       const source = await getFullSongSource(currentTrack.title, currentTrack.artist);
       if (!isSubscribed) return;
 
-      // Option A: Direct Full Song Audio Stream (320kbps MP3 - Instant Playback)
+      // Option A: Direct Full Song Audio Stream
       if (source?.streamUrl && audioRef.current) {
         audioRef.current.src = source.streamUrl;
         audioRef.current.volume = volume;
