@@ -82,94 +82,149 @@ const Player = () => {
     }
   }, [nextTrack]);
 
-  // Fetch YouTube video ID with multi-level fallbacks for full songs
-  const fetchFullSongVideoId = async (title, artist) => {
+  // Fetch Full Song Source (Direct Stream or YouTube Video ID) across redundant instances
+  const getFullSongSource = async (title, artist) => {
     const query = `${title} ${artist} audio`;
-    
-    // 1. Try Railway Backend API
+
+    // 1. Try Backend API
     try {
       const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.videoId) return data.videoId;
+        if (data.videoId) return { videoId: data.videoId };
       }
     } catch (e) {
-      console.warn("Backend yt-search unreachable, trying client fallback...", e);
+      console.warn("Backend API search failed:", e);
     }
 
-    // 2. Fallback 1: Piped API
-    try {
-      const res = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=music_videos`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.items && data.items.length > 0) {
-          const itemUrl = data.items[0].url || '';
-          const vId = itemUrl.includes('v=') ? itemUrl.split('v=')[1] : null;
-          if (vId) return vId;
+    // 2. Try Piped API instances for direct full audio stream OR video ID
+    const pipedNodes = [
+      'https://pipedapi.kavin.rocks',
+      'https://api.piped.yt',
+      'https://pipedapi.lunar.icu',
+      'https://pipedapi.drgns.space'
+    ];
+
+    for (const node of pipedNodes) {
+      try {
+        const searchRes = await fetch(`${node}/search?q=${encodeURIComponent(query)}&filter=music_videos`);
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          if (searchData.items && searchData.items.length > 0) {
+            const itemUrl = searchData.items[0].url || '';
+            const vId = itemUrl.includes('v=') ? itemUrl.split('v=')[1] : null;
+            if (vId) {
+              try {
+                const streamRes = await fetch(`${node}/streams/${vId}`);
+                if (streamRes.ok) {
+                  const streamData = await streamRes.json();
+                  if (streamData.audioStreams && streamData.audioStreams.length > 0) {
+                    const bestStream = streamData.audioStreams.find(s => s.mimeType?.includes('audio/mp4') || s.mimeType?.includes('audio/webm')) || streamData.audioStreams[0];
+                    if (bestStream?.url) {
+                      return { streamUrl: bestStream.url, videoId: vId };
+                    }
+                  }
+                }
+              } catch (streamErr) {
+                console.warn("Stream resolution failed:", streamErr);
+              }
+              return { videoId: vId };
+            }
+          }
         }
+      } catch (nodeErr) {
+        console.warn(`Piped node ${node} failed:`, nodeErr);
       }
-    } catch (e) {
-      console.warn("Piped fallback failed:", e);
     }
 
-    // 3. Fallback 2: Invidious API
-    try {
-      const res = await fetch(`https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].videoId) {
-          return data[0].videoId;
+    // 3. Try Invidious API instances
+    const invidiousNodes = [
+      'https://invidious.nerdvpn.de',
+      'https://inv.tux.pizza',
+      'https://invidious.drgns.space'
+    ];
+
+    for (const node of invidiousNodes) {
+      try {
+        const res = await fetch(`${node}/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0 && data[0].videoId) {
+            return { videoId: data[0].videoId };
+          }
         }
+      } catch (nodeErr) {
+        console.warn(`Invidious node ${node} failed:`, nodeErr);
       }
-    } catch (e) {
-      console.warn("Invidious fallback failed:", e);
     }
 
     return null;
   };
 
-  // Play current track logic (Prioritize FULL YouTube Song)
+  // Play current track logic (STRICTLY FULL SONGS)
   useEffect(() => {
     if (!currentTrack) return;
 
+    let isSubscribed = true;
+
     const playTrack = async () => {
-      // Pause existing audio if any
+      // Pause any running audio
       if (audioRef.current) {
         audioRef.current.pause();
       }
 
-      // Step 1: Try to fetch full song YouTube video ID
-      const videoId = await fetchFullSongVideoId(currentTrack.title, currentTrack.artist);
+      setCurrentTime(0);
+      setDuration(0);
 
-      if (videoId && isPlayerReady && playerRef.current?.loadVideoById) {
-        setActiveSource('youtube');
-        playerRef.current.loadVideoById(videoId);
-        setIsPlaying(true);
-        return;
-      }
+      // Search for full-length song source
+      const source = await getFullSongSource(currentTrack.title, currentTrack.artist);
+      if (!isSubscribed) return;
 
-      // Step 2: Fallback to 30s preview audio ONLY if YouTube video search fails completely
-      if (currentTrack.audioUrl && audioRef.current) {
-        console.warn("Full song YouTube video unavailable, falling back to preview audio...");
-        const fullAudioUrl = currentTrack.audioUrl.startsWith('http')
-          ? currentTrack.audioUrl
-          : `${API_BASE_URL}${currentTrack.audioUrl}`;
-        
-        audioRef.current.src = fullAudioUrl;
+      // Mode A: Direct Full-Length Audio Stream (.m4a / .webm / .mp3)
+      if (source?.streamUrl && audioRef.current) {
+        audioRef.current.src = source.streamUrl;
         audioRef.current.volume = volume;
         try {
           await audioRef.current.play();
-          setActiveSource('audio');
-          setIsPlaying(true);
+          if (isSubscribed) {
+            setActiveSource('audio');
+            setIsPlaying(true);
+            return;
+          }
         } catch (err) {
-          console.warn("Preview audio playback failed:", err);
-          setIsPlaying(false);
+          console.warn("Direct stream playback failed, retrying YouTube player...", err);
         }
       }
+
+      // Mode B: YouTube Iframe (retries until player instance is ready)
+      if (source?.videoId) {
+        let attempts = 0;
+        const loadYTVideo = () => {
+          if (!isSubscribed) return;
+          if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
+            setActiveSource('youtube');
+            playerRef.current.loadVideoById(source.videoId);
+            setIsPlaying(true);
+          } else if (attempts < 20) {
+            attempts++;
+            setTimeout(loadYTVideo, 250);
+          } else {
+            console.error("YouTube Player instance failed to initialize");
+          }
+        };
+        loadYTVideo();
+        return;
+      }
+
+      console.error("No full song source found for", currentTrack.title);
     };
 
     playTrack();
-  }, [currentTrack, isPlayerReady]);
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [currentTrack]);
 
   // Toggle play/pause control
   useEffect(() => {
