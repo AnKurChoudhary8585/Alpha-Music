@@ -20,13 +20,25 @@ const Player = () => {
         playerRef.current = new window.YT.Player('yt-player-container', {
           height: '0',
           width: '0',
-          playerVars: { autoplay: 1, controls: 0 },
+          playerVars: { 
+            autoplay: 1, 
+            controls: 0,
+            origin: window.location.origin,
+            enablejsapi: 1
+          },
           events: {
             onReady: () => setIsPlayerReady(true),
             onStateChange: (e) => {
               if (e.data === window.YT.PlayerState.ENDED) {
                 nextTrack();
               }
+            },
+            onError: (e) => {
+              console.warn('YouTube Player playback error:', e.data);
+              // Automatically skip unplayable or age-restricted video after 2 seconds
+              setTimeout(() => {
+                nextTrack();
+              }, 1500);
             }
           }
         });
@@ -45,16 +57,16 @@ const Player = () => {
 
   useEffect(() => {
     const fetchAndPlayVideo = async () => {
-      if (isPlayerReady && currentTrack && playerRef.current.loadVideoById) {
+      if (isPlayerReady && currentTrack && playerRef.current?.loadVideoById) {
         try {
-          const query = `${currentTrack.title} ${currentTrack.artist} audio`;
+          const query = `${currentTrack.title} ${currentTrack.artist} full song audio`;
           const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (data.videoId) {
             playerRef.current.loadVideoById(data.videoId);
             setIsPlaying(true);
           } else {
-             console.error('Video not found');
+             console.error('Video not found from search');
              setIsPlaying(false);
           }
         } catch (error) {

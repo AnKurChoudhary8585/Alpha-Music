@@ -10,16 +10,36 @@ router.post('/songs/upload', uploadSong);
 
 router.get('/yt-search', async (req, res) => {
   try {
-    // using node fetch (available in Node 18+)
-    const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(req.query.q)}`);
+    const query = req.query.q;
+    if (!query) return res.status(400).json({ error: 'Query parameter required' });
+
+    // 1. Try fetching YouTube results with Browser User-Agent
+    const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
     const html = await response.text();
     const match = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-    if (match) {
-      res.json({ videoId: match[1] });
-    } else {
-      res.status(404).json({ error: 'Not found in HTML' });
+    if (match && match[1]) {
+      return res.json({ videoId: match[1] });
     }
+
+    // 2. Fallback API if direct HTML scrape fails
+    const fallbackRes = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=music_videos`);
+    if (fallbackRes.ok) {
+      const pipedData = await fallbackRes.json();
+      if (pipedData.items && pipedData.items.length > 0) {
+        const itemUrl = pipedData.items[0].url || '';
+        const vId = itemUrl.includes('v=') ? itemUrl.split('v=')[1] : null;
+        if (vId) return res.json({ videoId: vId });
+      }
+    }
+
+    res.status(404).json({ error: 'Video not found' });
   } catch (err) {
+    console.error('yt-search error:', err);
     res.status(500).json({ error: err.message });
   }
 });
