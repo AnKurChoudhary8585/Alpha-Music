@@ -82,54 +82,94 @@ const Player = () => {
     }
   }, [nextTrack]);
 
-  // Play current track logic
+  // Fetch YouTube video ID with multi-level fallbacks for full songs
+  const fetchFullSongVideoId = async (title, artist) => {
+    const query = `${title} ${artist} audio`;
+    
+    // 1. Try Railway Backend API
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.videoId) return data.videoId;
+      }
+    } catch (e) {
+      console.warn("Backend yt-search unreachable, trying client fallback...", e);
+    }
+
+    // 2. Fallback 1: Piped API
+    try {
+      const res = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=music_videos`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items && data.items.length > 0) {
+          const itemUrl = data.items[0].url || '';
+          const vId = itemUrl.includes('v=') ? itemUrl.split('v=')[1] : null;
+          if (vId) return vId;
+        }
+      }
+    } catch (e) {
+      console.warn("Piped fallback failed:", e);
+    }
+
+    // 3. Fallback 2: Invidious API
+    try {
+      const res = await fetch(`https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0 && data[0].videoId) {
+          return data[0].videoId;
+        }
+      }
+    } catch (e) {
+      console.warn("Invidious fallback failed:", e);
+    }
+
+    return null;
+  };
+
+  // Play current track logic (Prioritize FULL YouTube Song)
   useEffect(() => {
     if (!currentTrack) return;
 
     const playTrack = async () => {
-      // 1. Try HTML5 Audio if audioUrl exists
-      if (currentTrack.audioUrl) {
+      // Pause existing audio if any
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+
+      // Step 1: Try to fetch full song YouTube video ID
+      const videoId = await fetchFullSongVideoId(currentTrack.title, currentTrack.artist);
+
+      if (videoId && isPlayerReady && playerRef.current?.loadVideoById) {
+        setActiveSource('youtube');
+        playerRef.current.loadVideoById(videoId);
+        setIsPlaying(true);
+        return;
+      }
+
+      // Step 2: Fallback to 30s preview audio ONLY if YouTube video search fails completely
+      if (currentTrack.audioUrl && audioRef.current) {
+        console.warn("Full song YouTube video unavailable, falling back to preview audio...");
         const fullAudioUrl = currentTrack.audioUrl.startsWith('http')
           ? currentTrack.audioUrl
           : `${API_BASE_URL}${currentTrack.audioUrl}`;
         
-        if (audioRef.current) {
-          audioRef.current.src = fullAudioUrl;
-          audioRef.current.volume = volume;
-          try {
-            await audioRef.current.play();
-            setActiveSource('audio');
-            setIsPlaying(true);
-            return;
-          } catch (err) {
-            console.warn("Direct audio play prevented or failed:", err);
-          }
-        }
-      }
-
-      // 2. Fallback to YouTube Iframe search
-      if (isPlayerReady && playerRef.current?.loadVideoById) {
+        audioRef.current.src = fullAudioUrl;
+        audioRef.current.volume = volume;
         try {
-          const query = `${currentTrack.title} ${currentTrack.artist} full song audio`;
-          const res = await fetch(`${API_BASE_URL}/api/yt-search?q=${encodeURIComponent(query)}`);
-          const data = await res.json();
-          if (data.videoId) {
-            setActiveSource('youtube');
-            playerRef.current.loadVideoById(data.videoId);
-            setIsPlaying(true);
-          } else {
-            console.error('Video not found from search');
-            setIsPlaying(false);
-          }
-        } catch (error) {
-          console.error('Error fetching video ID:', error);
+          await audioRef.current.play();
+          setActiveSource('audio');
+          setIsPlaying(true);
+        } catch (err) {
+          console.warn("Preview audio playback failed:", err);
           setIsPlaying(false);
         }
       }
     };
 
     playTrack();
-  }, [currentTrack]);
+  }, [currentTrack, isPlayerReady]);
 
   // Toggle play/pause control
   useEffect(() => {
